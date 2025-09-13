@@ -13,20 +13,6 @@ class Pessoa {
     );
   }
 
-  Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{'nome': nome, 'idade': idade};
-    if (id != null) map['id'] = id;
-    return map;
-  }
-
-  factory Pessoa.fromMap(Map<String, dynamic> map) {
-    return Pessoa(
-      id: map['id'] as int?,
-      nome: map['nome'] as String,
-      idade: (map['idade'] as num).toInt(),
-    );
-  }
-
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;

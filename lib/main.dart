@@ -11,91 +11,28 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart'
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart'
     show databaseFactoryFfiWeb;
 
-// ---------------------------
-// 2) DATABASE HELPER (Singleton)
-// ---------------------------
-class DatabaseHelper {
-  DatabaseHelper._internal();
-  static final DatabaseHelper instance = DatabaseHelper._internal();
+import 'core/database/database_helper.dart';
+import 'data/datasources/pessoa_local_datasource.dart';
+import 'data/repositories/pessoa_repository_impl.dart';
 
-  static const String _dbName = 'meu_banco.db';
-  static const String _table = 'pessoas';
+class DatabaseHelperAdapter {
+  static final DatabaseHelperAdapter instance =
+      DatabaseHelperAdapter._internal();
+  DatabaseHelperAdapter._internal();
 
-  Database? _db;
+  late final PessoaRepositoryImpl _repository;
 
-  Future<Database> get database async {
-    if (_db != null) return _db!;
-    _db = await _initDB();
-    return _db!;
+  void initialize() {
+    final dataSource = PessoaLocalDataSourceImpl(DatabaseHelper.instance);
+    _repository = PessoaRepositoryImpl(dataSource);
   }
 
-  Future<Database> _initDB() async {
-    Future<void> _onCreate(Database db, int version) async {
-      await db.execute('''
-      CREATE TABLE $_table(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        idade INTEGER NOT NULL
-      )
-    ''');
-    }
-
-    if (kIsWeb) {
-      // Web: usar apenas o NOME do banco (IndexedDB). Sem paths.
-      return await databaseFactory.openDatabase(
-        _dbName, // ex.: "meu_banco.db"
-        options: OpenDatabaseOptions(version: 1, onCreate: _onCreate),
-      );
-    } else {
-      // Android/iOS/desktop: usar caminho em getDatabasesPath()
-      final dbDir = await getDatabasesPath();
-      final path = p.join(dbDir, _dbName);
-      return await openDatabase(path, version: 1, onCreate: _onCreate);
-    }
-  }
-
-  // CREATE
-  Future<int> insert(Pessoa p) async {
-    final db = await database;
-    return db.insert(
-      _table,
-      p.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.abort,
-    );
-  }
-
-  // READ by id
-  Future<Pessoa?> getById(int id) async {
-    final db = await database;
-    final result = await db.query(
-      _table,
-      where: 'id = ?',
-      whereArgs: [id],
-      limit: 1,
-    );
-    if (result.isEmpty) return null;
-    return Pessoa.fromMap(result.first);
-  }
-
-  // READ all
-  Future<List<Pessoa>> getAll() async {
-    final db = await database;
-    final maps = await db.query(_table, orderBy: 'id DESC');
-    return maps.map((m) => Pessoa.fromMap(m)).toList();
-  }
-
-  // UPDATE
-  Future<int> update(Pessoa p) async {
-    if (p.id == null) return 0;
-    final db = await database;
-    return db.update(_table, p.toMap(), where: 'id = ?', whereArgs: [p.id]);
-  }
-
-  // DELETE
-  Future<int> delete(int id) async {
-    final db = await database;
-    return db.delete(_table, where: 'id = ?', whereArgs: [id]);
-  }
+  // Métodos que mantêm a interface antiga
+  Future<int> insert(Pessoa p) => _repository.addPessoa(p);
+  Future<Pessoa?> getById(int id) => _repository.getPessoa(id);
+  Future<List<Pessoa>> getAll() => _repository.getAllPessoas();
+  Future<int> update(Pessoa p) => _repository.updatePessoa(p);
+  Future<int> delete(int id) => _repository.deletePessoa(id);
 }
 
 // ---------------------------
@@ -111,6 +48,9 @@ void main() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+
+  // Inicializar o adaptador
+  DatabaseHelperAdapter.instance.initialize();
 
   runApp(const PessoasApp());
 }
@@ -151,7 +91,7 @@ class _PessoasPageState extends State<PessoasPage> {
   @override
   void initState() {
     super.initState();
-    _futurePessoas = DatabaseHelper.instance.getAll();
+    _futurePessoas = DatabaseHelperAdapter.instance.getAll();
   }
 
   @override
@@ -176,7 +116,7 @@ class _PessoasPageState extends State<PessoasPage> {
 
   Future<void> _refresh() async {
     setState(() {
-      _futurePessoas = DatabaseHelper.instance.getAll();
+      _futurePessoas = DatabaseHelperAdapter.instance.getAll();
       _reloadTick++; // muda a key e força rebuild do FutureBuilder
     });
   }
@@ -191,13 +131,15 @@ class _PessoasPageState extends State<PessoasPage> {
       final idade = int.parse(_idadeCtrl.text.trim());
 
       if (_editingId == null) {
-        await DatabaseHelper.instance.insert(Pessoa(nome: nome, idade: idade));
+        await DatabaseHelperAdapter.instance.insert(
+          Pessoa(nome: nome, idade: idade),
+        );
         if (!mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Pessoa adicionada!')));
       } else {
-        await DatabaseHelper.instance.update(
+        await DatabaseHelperAdapter.instance.update(
           Pessoa(id: _editingId, nome: nome, idade: idade),
         );
         if (!mounted) return;
@@ -220,7 +162,7 @@ class _PessoasPageState extends State<PessoasPage> {
   }
 
   Future<void> _apagar(int id) async {
-    await DatabaseHelper.instance.delete(id);
+    await DatabaseHelperAdapter.instance.delete(id);
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
