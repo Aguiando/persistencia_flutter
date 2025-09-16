@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import '../../domain/entities/pessoa.dart';
+import '../../core/di/dependency_injection.dart';
 import '../viewmodels/pessoas_viewmodel.dart';
 import '../widgets/pessoa_form.dart';
 import '../widgets/pessoa_list.dart';
 
+/// Página principal para gerenciamento de pessoas
+/// Implementa Clean Architecture com Dependency Injection
 class PessoasPage extends StatefulWidget {
   const PessoasPage({super.key});
 
@@ -12,116 +14,109 @@ class PessoasPage extends StatefulWidget {
 }
 
 class _PessoasPageState extends State<PessoasPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _nomeCtrl = TextEditingController();
-  final _idadeCtrl = TextEditingController();
-
-  int? _editingId; // se != null, estamos editando
-  late Future<List<Pessoa>> _futurePessoas;
-  bool _isSaving = false;
-  int _reloadTick = 0; // <--- NOVO
+  late final PessoasViewModel _viewModel;
 
   @override
   void initState() {
     super.initState();
-    _futurePessoas = DatabaseHelperAdapter.instance.getAll();
+    // Dependency Injection - GetIt
+    _viewModel = serviceLocator<PessoasViewModel>();
+    _loadData();
   }
 
   @override
   void dispose() {
-    _nomeCtrl.dispose();
-    _idadeCtrl.dispose();
+    _viewModel.dispose();
     super.dispose();
   }
 
-  void _limparFormulario() {
-    _formKey.currentState?.reset();
-    _nomeCtrl.clear();
-    _idadeCtrl.clear();
-    _editingId = null;
-
-    // desfoca teclado (especialmente no Web)
-    FocusScope.of(context).unfocus();
-
-    // avisa a UI que mudou (para atualizar botão/estado)
-    setState(() {});
+  /// Carrega dados iniciais
+  Future<void> _loadData() async {
+    await _viewModel.loadPessoas();
   }
 
-  Future<void> _refresh() async {
-    setState(() {
-      _futurePessoas = DatabaseHelperAdapter.instance.getAll();
-      _reloadTick++; // muda a key e força rebuild do FutureBuilder
-    });
-  }
+  /// Manipula salvamento (add/update)
+  Future<bool> _handleSave(String nome, int idade) async {
+    bool success;
 
-  Future<void> _salvar() async {
-    if (_isSaving) return; // evita duplo clique / enter+clique
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-
-    setState(() => _isSaving = true);
-    try {
-      final nome = _nomeCtrl.text.trim();
-      final idade = int.parse(_idadeCtrl.text.trim());
-
-      if (_editingId == null) {
-        await DatabaseHelperAdapter.instance.insert(
-          Pessoa(nome: nome, idade: idade),
-        );
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Pessoa adicionada!')));
-      } else {
-        await DatabaseHelperAdapter.instance.update(
-          Pessoa(id: _editingId, nome: nome, idade: idade),
-        );
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Pessoa atualizada!')));
+    if (_viewModel.isEditing) {
+      success = await _viewModel.updatePessoa(nome, idade);
+      if (success && mounted) {
+        _showSuccessSnackBar('Pessoa atualizada com sucesso!');
       }
+    } else {
+      success = await _viewModel.addPessoa(nome, idade);
+      if (success && mounted) {
+        _showSuccessSnackBar('Pessoa adicionada com sucesso!');
+      }
+    }
 
-      _limparFormulario();
-      // deixa a UI respirar, e o FutureBuilder atualiza assim que o Future completar
-      _refresh(); // dispara o FutureBuilder atualizar
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+    // Mostra erro se houver
+    if (!success && mounted && _viewModel.error != null) {
+      _showErrorSnackBar(_viewModel.error!);
+      _viewModel.clearError();
+    }
+
+    return success;
+  }
+
+  /// Manipula exclusão
+  Future<void> _handleDelete(int id) async {
+    final success = await _viewModel.deletePessoa(id);
+
+    if (!mounted) return;
+
+    if (success) {
+      _showSuccessSnackBar('Pessoa removida com sucesso!');
+    } else if (_viewModel.error != null) {
+      _showErrorSnackBar(_viewModel.error!);
+      _viewModel.clearError();
     }
   }
 
-  Future<void> _apagar(int id) async {
-    await DatabaseHelperAdapter.instance.delete(id);
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Pessoa removida.')));
-    await _refresh();
+  /// Manipula edição
+  void _handleEdit(pessoa) {
+    _viewModel.setEditingPessoa(pessoa);
   }
 
-  void _carregarParaEdicao(Pessoa p) {
-    setState(() {
-      _editingId = p.id;
-      _nomeCtrl.text = p.nome;
-      _idadeCtrl.text = p.idade.toString();
-    });
+  /// Cancela edição
+  void _handleCancelEdit() {
+    _viewModel.clearEditing();
+  }
+
+  /// Mostra mensagem de sucesso
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Mostra mensagem de erro
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = _editingId != null;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pessoas (SQLite)'),
+        centerTitle: true,
         actions: [
           IconButton(
-            tooltip: 'Recarregar',
-            onPressed: _refresh,
+            tooltip: 'Recarregar lista',
+            onPressed: _loadData,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -129,45 +124,33 @@ class _PessoasPageState extends State<PessoasPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // ---------------------------
-            // Formulário
-            // ---------------------------
-            PessoaForm(
-              formKey: _formKey,
-              nomeCtrl: _nomeCtrl,
-              idadeCtrl: _idadeCtrl,
-              isSaving: _isSaving,
-              isEditing: isEditing,
-              onSalvar: _salvar,
-              onCancelar: _limparFormulario,
+            // Formulário de entrada
+            ListenableBuilder(
+              listenable: _viewModel,
+              builder: (context, child) {
+               return PessoaForm(
+                onSave: _handleSave,
+                onCancel: _viewModel.isEditing ? _handleCancelEdit : null,
+                editingPessoa: _viewModel.editingPessoa,
+                isLoading: _viewModel.isSaving,
+              );
+              },
             ),
+
             const Divider(height: 1),
-            // ---------------------------
-            // Lista
-            // ---------------------------
+
+            // Lista de pessoas
             Expanded(
-              child: FutureBuilder<List<Pessoa>>(
-                key: ValueKey(
-                  _reloadTick,
-                ), // <- força rebuild quando _reloadTick muda
-                future: _futurePessoas,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: CircularProgressIndicator(),
-                      ),
-                    );
-                  }
-                  if (snapshot.hasError) {
-                    return Center(child: Text('Erro: ${snapshot.error}'));
-                  }
-                  final pessoas = snapshot.data ?? const <Pessoa>[];
+              child: ListenableBuilder(
+                listenable: _viewModel,
+                builder: (context, child) {
                   return PessoaList(
-                    pessoas: pessoas,
-                    onEditar: _carregarParaEdicao,
-                    onApagar: (p) => _apagar(p.id!),
+                    pessoas: _viewModel.pessoas,
+                    isLoading: _viewModel.isLoading,
+                    error: _viewModel.error,
+                    onEdit: _handleEdit,
+                    onDelete: _handleDelete,
+                    onRefresh: _loadData,
                   );
                 },
               ),
