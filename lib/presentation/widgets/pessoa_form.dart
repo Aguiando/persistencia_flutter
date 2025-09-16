@@ -1,101 +1,121 @@
 import 'package:flutter/material.dart';
+import '../../domain/entities/pessoa.dart';
 
-class PessoaForm extends StatelessWidget {
-  final GlobalKey<FormState> formKey;
-  final TextEditingController nomeCtrl;
-  final TextEditingController idadeCtrl;
-  final bool isSaving;
-  final bool isEditing;
-  final VoidCallback onSalvar;
-  final VoidCallback onCancelar;
-
+class PessoaForm extends StatefulWidget {
   const PessoaForm({
     super.key,
-    required this.formKey,
-    required this.nomeCtrl,
-    required this.idadeCtrl,
-    required this.isSaving,
-    required this.isEditing,
-    required this.onSalvar,
-    required this.onCancelar,
+    required this.onSave,
+    this.initial,
+    this.onCancel, // opcional
+    this.editingPessoa, // Pessoa? para edição
+    this.isLoading = false, // bool para spinner
   });
+
+  final Future<bool> Function(String nome, int idade) onSave;
+  final VoidCallback? onCancel;
+  final Pessoa? editingPessoa;
+  final bool isLoading;
+
+  final Pessoa? initial;
+
+  @override
+  State<PessoaForm> createState() => _PessoaFormState();
+}
+
+class _PessoaFormState extends State<PessoaForm> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nomeCtrl;
+  late final TextEditingController _idadeCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nomeCtrl = TextEditingController(text: widget.initial?.nome ?? '');
+    _idadeCtrl = TextEditingController(
+      text: widget.initial?.idade != null
+          ? widget.initial!.idade.toString()
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _nomeCtrl.dispose();
+    _idadeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) return;
+    final nome = _nomeCtrl.text.trim();
+    final idade = int.parse(_idadeCtrl.text.trim());
+    widget.onSave(nome, idade); // ← usa o callback (nada além disso)
+    Navigator.of(context).maybePop();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.initial != null;
+
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        top: 16,
+      ),
       child: Form(
-        key: formKey,
+        key: _formKey,
         child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              isEditing ? 'Editar pessoa' : 'Nova pessoa',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
             TextFormField(
-              controller: nomeCtrl,
+              controller: _nomeCtrl,
               decoration: const InputDecoration(
                 labelText: 'Nome',
                 border: OutlineInputBorder(),
               ),
               textInputAction: TextInputAction.next,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) {
-                  return 'Informe o nome';
-                }
-                if (v.trim().length < 2) {
-                  return 'Nome muito curto';
-                }
-                return null;
-              },
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Informe o nome' : null,
             ),
             const SizedBox(height: 12),
             TextFormField(
-              controller: idadeCtrl,
+              controller: _idadeCtrl,
               decoration: const InputDecoration(
                 labelText: 'Idade',
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.number,
               validator: (v) {
-                if (v == null || v.trim().isEmpty) {
-                  return 'Informe a idade';
-                }
+                if (v == null || v.trim().isEmpty) return 'Informe a idade';
                 final n = int.tryParse(v.trim());
-                if (n == null || n < 0 || n > 150) {
-                  return 'Idade inválida';
-                }
+                if (n == null || n < 0) return 'Idade inválida';
                 return null;
               },
-              onFieldSubmitted: (_) {
-                if (!isSaving) onSalvar();
-              },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: isSaving ? null : onSalvar,
-                    icon: isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Icon(isEditing ? Icons.save : Icons.add),
-                    label: Text(
-                      isEditing ? 'Salvar alterações' : 'Adicionar',
-                    ),
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    child: const Text('Cancelar'),
                   ),
                 ),
                 const SizedBox(width: 12),
-                if (isEditing)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onCancelar,
-                      icon: const Icon(Icons.close),
-                      label: const Text('Cancelar edição'),
-                    ),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _submit,
+                    child: Text(isEditing ? 'Salvar alterações' : 'Salvar'),
                   ),
+                ),
               ],
             ),
           ],
